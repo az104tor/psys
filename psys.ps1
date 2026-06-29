@@ -132,19 +132,35 @@ function Invoke-FlushBuffer {
 
 # ============================================================
 # SPARKLINE
+# Set $SPARK_USE_ASCII = $true at the top of param() if your terminal
+# shows ???? instead of bar characters, or run: chcp 65001
 # ============================================================
-$SPARK_CHARS = [char[]]@(0x2581,0x2582,0x2583,0x2584,0x2585,0x2586,0x2587,0x2588)
+$SPARK_UNICODE = [char[]]@(0x2581,0x2582,0x2583,0x2584,0x2585,0x2586,0x2587,0x2588)
+$SPARK_ASCII   = [char[]]@([char]'_',[char]'.',[char]',',[char]'-',[char]'~',[char]'+',[char]'*',[char]'#')
+
+function Test-UnicodeSupport {
+    # Write a block char off-screen and read it back — if it round-trips it is supported
+    try {
+        $testChar = [char]0x2588
+        $encoded  = [Console]::OutputEncoding.GetBytes($testChar)
+        $decoded  = [Console]::OutputEncoding.GetString($encoded)
+        return ($decoded[0] -eq $testChar)
+    } catch { return $false }
+}
+
+# Detect once at startup — stored in script scope
+$script:SparkChars = if (Test-UnicodeSupport) { $SPARK_UNICODE } else { $SPARK_ASCII }
 
 function Get-Sparkline {
     param([double[]]$History, [int]$Width = 8)
     if (-not $History -or $History.Count -eq 0) { return " " * $Width }
     $recent = $History | Select-Object -Last $Width
     $max    = ($recent | Measure-Object -Maximum).Maximum
-    if ($max -le 0) { return ([string][char]0x2581) * $recent.Count }
+    if ($max -le 0) { return [string]$script:SparkChars[0] * $recent.Count }
     $sb = [System.Text.StringBuilder]::new()
     foreach ($v in $recent) {
         $idx = [math]::Min([math]::Floor($v / $max * 7), 7)
-        $null = $sb.Append($SPARK_CHARS[$idx])
+        $null = $sb.Append($script:SparkChars[$idx])
     }
     return $sb.ToString().PadLeft($Width)
 }
@@ -1384,6 +1400,10 @@ function Invoke-KeyInput {
 # MAIN LOOP
 # ============================================================
 $logicalCpus = Get-LogicalCpuCount
+
+# Set UTF-8 output encoding so Unicode block chars render correctly
+# on all terminals. Falls back gracefully if not supported.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 Write-Host "psys starting... (collecting first snapshot, please wait)" -ForegroundColor Cyan
 try {
